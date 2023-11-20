@@ -45,6 +45,14 @@
 #define TLSEXT_TYPE_out_of_range       0x10001
 unsigned int ossl_get_extension_type(size_t idx);
 
+/*
+ * sm2-id and cert verify id defined in RFC 8998
+ */
+# define HANDSHAKE_SM2_ID "TLSv1.3+GM+Cipher+Suite"
+# define HANDSHAKE_SM2_ID_LEN sizeof(HANDSHAKE_SM2_ID) - 1
+# define CERTVRIFY_SM2_ID "1234567812345678"
+# define CERTVRIFY_SM2_ID_LEN sizeof(CERTVRIFY_SM2_ID) - 1
+
 extern const unsigned char hrrrandom[];
 
 /* Message processing return codes */

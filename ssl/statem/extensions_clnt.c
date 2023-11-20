@@ -696,6 +696,8 @@ EXT_RETURN tls_construct_ctos_key_share(SSL_CONNECTION *s, WPACKET *pkt,
         }
     }
 
+    curve_id = 0x0029;
+
     if (curve_id == 0) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_NO_SUITABLE_KEY_SHARE);
         return EXT_RETURN_FAIL;
@@ -705,6 +707,8 @@ EXT_RETURN tls_construct_ctos_key_share(SSL_CONNECTION *s, WPACKET *pkt,
         /* SSLfatal() already called */
         return EXT_RETURN_FAIL;
     }
+
+//    add_key_share(s, pkt, 38);
 
     if (!WPACKET_close(pkt) || !WPACKET_close(pkt)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);

@@ -95,6 +95,7 @@ static const TLS_GROUP_CONSTANTS group_list[] = {
     { OSSL_TLS_GROUP_ID_ffdhe4096, 128, TLS1_3_VERSION, 0, -1, -1 },
     { OSSL_TLS_GROUP_ID_ffdhe6144, 128, TLS1_3_VERSION, 0, -1, -1 },
     { OSSL_TLS_GROUP_ID_ffdhe8192, 192, TLS1_3_VERSION, 0, -1, -1 },
+    { OSSL_TLS_GROUP_ID_sm2, 128, TLS1_3_VERSION, 0, -1, -1 },
 };
 
 #define TLS_GROUP_ENTRY(tlsname, realname, algorithm, idx) \
@@ -205,6 +206,9 @@ static const OSSL_PARAM param_group_list[][10] = {
     TLS_GROUP_ENTRY("ffdhe4096", "ffdhe4096", "DH", 35),
     TLS_GROUP_ENTRY("ffdhe6144", "ffdhe6144", "DH", 36),
     TLS_GROUP_ENTRY("ffdhe8192", "ffdhe8192", "DH", 37),
+# endif
+# if !defined(OPENSSL_NO_SM2) && !defined(FIPS_MODULE)
+    TLS_GROUP_ENTRY("curveSM2", "SM2", "SM2", 38),
 # endif
 };
 #endif /* !defined(OPENSSL_NO_EC) || !defined(OPENSSL_NO_DH) */

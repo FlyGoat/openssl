@@ -55,6 +55,8 @@ static const ssl_cipher_table ssl_cipher_table_cipher[SSL_ENC_NUM_IDX] = {
     {SSL_ARIA256GCM, NID_aria_256_gcm}, /* SSL_ENC_ARIA256GCM_IDX 21 */
     {SSL_MAGMA, NID_magma_ctr_acpkm}, /* SSL_ENC_MAGMA_IDX */
     {SSL_KUZNYECHIK, NID_kuznyechik_ctr_acpkm}, /* SSL_ENC_KUZNYECHIK_IDX */
+    {SSL_SM4GCM, NID_sm4_gcm},      /* SSL_ENC_SM4_IDX 24 */
+    {SSL_SM4CCM, NID_sm4_ccm}       /* SSL_ENC_SM4_IDX 25 */
 };
 
 #define SSL_COMP_NULL_IDX       0
@@ -82,7 +84,8 @@ static const ssl_cipher_table ssl_cipher_table_mac[SSL_MD_NUM_IDX] = {
     {0, NID_sha224},            /* SSL_MD_SHA224_IDX 10 */
     {0, NID_sha512},            /* SSL_MD_SHA512_IDX 11 */
     {SSL_MAGMAOMAC, NID_magma_mac}, /* sSL_MD_MAGMAOMAC_IDX */
-    {SSL_KUZNYECHIKOMAC, NID_kuznyechik_mac} /* SSL_MD_KUZNYECHIKOMAC_IDX */
+    {SSL_KUZNYECHIKOMAC, NID_kuznyechik_mac}, /* SSL_MD_KUZNYECHIKOMAC_IDX */
+    {SSL_SM3, NID_sm3}          /* SSL_MD_SM3 */
 };
 
 /* *INDENT-OFF* */
@@ -209,6 +212,7 @@ static const SSL_CIPHER cipher_aliases[] = {
     {0, SSL_TXT_aGOST12, NULL, 0, 0, SSL_aGOST12},
     {0, SSL_TXT_aGOST, NULL, 0, 0, SSL_aGOST01 | SSL_aGOST12},
     {0, SSL_TXT_aSRP, NULL, 0, 0, SSL_aSRP},
+    {0, SSL_TXT_aSM2, NULL, 0, 0, SSL_aSM2},
 
     /* aliases combining key exchange and server authentication */
     {0, SSL_TXT_EDH, NULL, 0, SSL_kDHE, ~SSL_aNULL},
@@ -251,6 +255,7 @@ static const SSL_CIPHER cipher_aliases[] = {
     {0, SSL_TXT_ARIA128, NULL, 0, 0, 0, SSL_ARIA128GCM},
     {0, SSL_TXT_ARIA256, NULL, 0, 0, 0, SSL_ARIA256GCM},
     {0, SSL_TXT_CBC, NULL, 0, 0, 0, SSL_CBC},
+    {0, SSL_TXT_SM4, NULL, 0, 0, 0, SSL_SM4},
 
     /* MAC aliases */
     {0, SSL_TXT_MD5, NULL, 0, 0, 0, 0, SSL_MD5},
@@ -261,6 +266,7 @@ static const SSL_CIPHER cipher_aliases[] = {
     {0, SSL_TXT_SHA256, NULL, 0, 0, 0, 0, SSL_SHA256},
     {0, SSL_TXT_SHA384, NULL, 0, 0, 0, 0, SSL_SHA384},
     {0, SSL_TXT_GOST12, NULL, 0, 0, 0, 0, SSL_GOST12_256},
+    {0, SSL_TXT_SM3, NULL, 0, 0, 0, 0, SSL_SM3},
 
     /* protocol version aliases */
     {0, SSL_TXT_SSLV3, NULL, 0, 0, 0, 0, 0, SSL3_VERSION},
@@ -485,6 +491,7 @@ int ssl_cipher_get_evp_cipher(SSL_CTX *ctx, const SSL_CIPHER *sslc,
     int i = ssl_cipher_info_lookup(ssl_cipher_table_cipher, sslc->algorithm_enc);
 
     if (i == -1) {
+        printf("ssl_cipher_get_evp: unsupported cipher %d\n", sslc->algorithm_enc);
         *enc = NULL;
     } else {
         if (i == SSL_ENC_NULL_IDX) {
@@ -493,6 +500,7 @@ int ssl_cipher_get_evp_cipher(SSL_CTX *ctx, const SSL_CIPHER *sslc,
              * just do a normal EVP_CIPHER_fetch instead of
              * ssl_evp_cipher_fetch()
              */
+            printf("ssl_cipher_get_evp: NULL cipher\n");
             *enc = EVP_CIPHER_fetch(ctx->libctx, "NULL", ctx->propq);
             if (*enc == NULL)
                 return 0;
@@ -500,8 +508,10 @@ int ssl_cipher_get_evp_cipher(SSL_CTX *ctx, const SSL_CIPHER *sslc,
             const EVP_CIPHER *cipher = ctx->ssl_cipher_methods[i];
 
             if (cipher == NULL
-                    || !ssl_evp_cipher_up_ref(cipher))
+                    || !ssl_evp_cipher_up_ref(cipher)) {
+                printf("ssl_cipher_get_evp: unsupported cipher 2\n");
                 return 0;
+            }
             *enc = ctx->ssl_cipher_methods[i];
         }
     }
@@ -549,6 +559,7 @@ int ssl_cipher_get_evp(SSL_CTX *ctx, const SSL_SESSION *s,
 
     i = ssl_cipher_info_lookup(ssl_cipher_table_mac, c->algorithm_mac);
     if (i == -1) {
+        printf("ssl_cipher_get_evp: unsupported mac algorithm\n");
         *md = NULL;
         if (mac_pkey_type != NULL)
             *mac_pkey_type = NID_undef;
@@ -2235,14 +2246,28 @@ int ssl_cipher_get_overhead(const SSL_CIPHER *c, size_t *mac_overhead,
 int ssl_cert_is_disabled(SSL_CTX *ctx, size_t idx)
 {
     SSL_CERT_LOOKUP *cl;
+    uint32_t amask;
 
     /* A provider-loaded key type is always enabled */
     if (idx >= SSL_PKEY_NUM)
         return 0;
 
     cl = ssl_cert_lookup_by_idx(idx, ctx);
-    if (cl == NULL || (cl->amask & ctx->disabled_auth_mask) != 0)
+    if (cl == NULL) {
+        printf("ssl_cert_is_disabled: no lookup for %zu\n", idx);
         return 1;
+    }
+
+    amask = cl->amask;
+
+#ifndef OPENSSL_NO_SM2
+    if (cl->nid == EVP_PKEY_EC && (ctx->disabled_auth_mask & SSL_aSM2) != 0)
+        amask &= ~SSL_aSM2;
+#endif
+
+    if ((amask & ctx->disabled_auth_mask) != 0)
+        return 1;
+
     return 0;
 }
 
@@ -2265,5 +2290,10 @@ const char *OSSL_default_ciphersuites(void)
 {
     return "TLS_AES_256_GCM_SHA384:"
            "TLS_CHACHA20_POLY1305_SHA256:"
-           "TLS_AES_128_GCM_SHA256";
+           "TLS_AES_128_GCM_SHA256"
+#if (!defined OPENSSL_NO_SM3) && (!defined OPENSSL_NO_SM4)
+           ":TLS_SM4_GCM_SM3"
+           ":TLS_SM4_CCM_SM3"
+#endif
+           ;
 }

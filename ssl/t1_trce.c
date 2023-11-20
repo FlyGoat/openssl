@@ -540,6 +540,7 @@ static const ssl_trace_tbl ssl_groups_tbl[] = {
     {38, "GC512A"},
     {39, "GC512B"},
     {40, "GC512C"},
+    {41, "curveSM2"},
     {256, "ffdhe2048"},
     {257, "ffdhe3072"},
     {258, "ffdhe4096"},
@@ -595,6 +596,7 @@ static const ssl_trace_tbl ssl_sigalg_tbl[] = {
     {TLSEXT_SIGALG_ecdsa_brainpoolP256r1_sha256, "ecdsa_brainpoolP256r1_sha256"},
     {TLSEXT_SIGALG_ecdsa_brainpoolP384r1_sha384, "ecdsa_brainpoolP384r1_sha384"},
     {TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512, "ecdsa_brainpoolP512r1_sha512"},
+    {TLSEXT_SIGALG_sm2sig_sm3, "sm2sig_sm3"},
 };
 
 static const ssl_trace_tbl ssl_ctype_tbl[] = {

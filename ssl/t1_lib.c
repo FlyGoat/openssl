@@ -184,6 +184,7 @@ static struct {
     {NID_id_tc26_gost_3410_2012_512_paramSetA, OSSL_TLS_GROUP_ID_gc512A},
     {NID_id_tc26_gost_3410_2012_512_paramSetB, OSSL_TLS_GROUP_ID_gc512B},
     {NID_id_tc26_gost_3410_2012_512_paramSetC, OSSL_TLS_GROUP_ID_gc512C},
+    {NID_sm2, OSSL_TLS_GROUP_ID_sm2},
     {NID_ffdhe2048, OSSL_TLS_GROUP_ID_ffdhe2048},
     {NID_ffdhe3072, OSSL_TLS_GROUP_ID_ffdhe3072},
     {NID_ffdhe4096, OSSL_TLS_GROUP_ID_ffdhe4096},
@@ -211,6 +212,7 @@ static const uint16_t supported_groups_default[] = {
     OSSL_TLS_GROUP_ID_gc512A,        /* GC512A (38) */
     OSSL_TLS_GROUP_ID_gc512B,        /* GC512B (39) */
     OSSL_TLS_GROUP_ID_gc512C,        /* GC512C (40) */
+    OSSL_TLS_GROUP_ID_sm2,           /* SM2 (41) */
     OSSL_TLS_GROUP_ID_ffdhe2048,     /* ffdhe2048 (0x100) */
     OSSL_TLS_GROUP_ID_ffdhe3072,     /* ffdhe3072 (0x101) */
     OSSL_TLS_GROUP_ID_ffdhe4096,     /* ffdhe4096 (0x102) */
@@ -1017,6 +1019,10 @@ int tls1_set_groups(uint16_t **pext, size_t *pextlen,
         unsigned long idmask;
         uint16_t id;
         id = tls1_nid2group_id(groups[i]);
+        if (ngroups == 1) {
+            glist[i] = id;
+            break;
+        }
         if ((id & 0x00FF) >= (sizeof(unsigned long) * 8))
             goto err;
         idmask = 1L << (id & 0x00FF);
@@ -1332,6 +1338,9 @@ static const uint16_t tls12_sigalgs[] = {
     TLSEXT_SIGALG_ecdsa_brainpoolP256r1_sha256,
     TLSEXT_SIGALG_ecdsa_brainpoolP384r1_sha384,
     TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512,
+#ifndef OPENSSL_NO_SM2
+    TLSEXT_SIGALG_sm2sig_sm3,
+#endif
 
     TLSEXT_SIGALG_rsa_pss_pss_sha256,
     TLSEXT_SIGALG_rsa_pss_pss_sha384,
@@ -1471,7 +1480,12 @@ static const SIGALG_LOOKUP sigalg_lookup_tbl[] = {
     {NULL, TLSEXT_SIGALG_gostr34102001_gostr3411,
      NID_id_GostR3411_94, SSL_MD_GOST94_IDX,
      NID_id_GostR3410_2001, SSL_PKEY_GOST01,
-     NID_undef, NID_undef, 1}
+     NID_undef, NID_undef, 1},
+#endif
+#if (!defined OPENSSL_NO_SM2) && (!defined OPENSSL_NO_SM3)
+    {"sm2sig_sm3", TLSEXT_SIGALG_sm2sig_sm3,
+     NID_sm3, SSL_MD_SM3_IDX, EVP_PKEY_SM2, SSL_PKEY_SM2,
+     NID_SM2_with_SM3, NID_sm2, 1}
 #endif
 };
 /* Legacy sigalgs for TLS < 1.2 RSA TLS signatures */
@@ -1540,17 +1554,24 @@ int ssl_setup_sigalgs(SSL_CTX *ctx)
         if (lu->hash != NID_undef
                 && ctx->ssl_digest_methods[lu->hash_idx] == NULL) {
             cache[i].enabled = 0;
+            if (lu->name)
+                printf("no hash for %s\n", lu->name);
             continue;
         }
 
         if (!EVP_PKEY_set_type(tmpkey, lu->sig)) {
             cache[i].enabled = 0;
+            if (lu->name)
+                printf("no type for %s\n", lu->name);
             continue;
         }
         pctx = EVP_PKEY_CTX_new_from_pkey(ctx->libctx, tmpkey, ctx->propq);
         /* If unable to create pctx we assume the sig algorithm is unavailable */
-        if (pctx == NULL)
+        if (pctx == NULL) {
             cache[i].enabled = 0;
+            if (lu->name)
+                printf("Unable to create pctx for %s\n", lu->name);
+        }
         EVP_PKEY_CTX_free(pctx);
     }
 
@@ -1900,7 +1921,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     if (lu == NULL
         || (SSL_CONNECTION_IS_TLS13(s)
             && (lu->hash == NID_sha1 || lu->hash == NID_sha224))
-        || (pkeyid != lu->sig
+        || (pkeyid != lu->sig && lu->sig != EVP_PKEY_SM2
         && (lu->sig != EVP_PKEY_RSA_PSS || pkeyid != EVP_PKEY_RSA))) {
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
@@ -2513,8 +2534,10 @@ static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op,
         return 0;
 
     /* See if public key algorithm allowed */
-    if (ssl_cert_is_disabled(SSL_CONNECTION_GET_CTX(s), lu->sig_idx))
+    if (ssl_cert_is_disabled(SSL_CONNECTION_GET_CTX(s), lu->sig_idx)) {
+        printf("tls12_sigalg_allowed: pubkey disabled\n");
         return 0;
+    }
 
     if (lu->sig == NID_id_GostR3410_2012_256
             || lu->sig == NID_id_GostR3410_2012_512
@@ -2559,7 +2582,8 @@ static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op,
     secbits = sigalg_security_bits(SSL_CONNECTION_GET_CTX(s), lu);
     sigalgstr[0] = (lu->sigalg >> 8) & 0xff;
     sigalgstr[1] = lu->sigalg & 0xff;
-    return ssl_security(s, op, secbits, lu->hash, (void *)sigalgstr);
+    int i = ssl_security(s, op, secbits, lu->hash, (void *)sigalgstr);
+    return i;
 }
 
 /*
@@ -2610,6 +2634,25 @@ int tls12_copy_sigalgs(SSL_CONNECTION *s, WPACKET *pkt,
         if (lu == NULL
                 || !tls12_sigalg_allowed(s, SSL_SECOP_SIGALG_SUPPORTED, lu))
             continue;
+
+#if 1
+        /*
+         * RFC 8998 requires that
+         * if the server chooses TLS_SM4_GCM_SM3 or TLS_SM4_CCM_SM3,
+         * the only valid signature algorithm present in
+         * "signature_algorithms" extension MUST be "sm2sig_sm3".
+         */
+        if (SSL_CONNECTION_IS_TLS13(s) && s->server) {
+            const SSL_CIPHER *cipher = s->s3.tmp.new_cipher;
+
+            if (cipher != NULL &&
+                (cipher->id == TLS1_3_CK_SM4_GCM_SM3
+                    || cipher->id == TLS1_3_CK_SM4_CCM_SM3)) {
+                if (lu->sigalg != TLSEXT_SIGALG_sm2sig_sm3)
+                    continue;
+            }
+        }
+#endif
         if (!WPACKET_put_bytes_u16(pkt, *psig))
             return 0;
         /*
